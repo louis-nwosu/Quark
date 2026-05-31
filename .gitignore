@@ -1,0 +1,22 @@
+# Binary
+quark
+quark.exe
+
+# Local config (may contain API keys)
+.quark.json
+
+# Session persistence
+session.json
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go
+*.test
+*.out
