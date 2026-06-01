@@ -905,12 +905,18 @@
 
         <div class="install-code">
           <span class="prompt">$</span>
+          <span>brew install louis-nwosu/tap/quark</span>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText('brew install louis-nwosu/tap/quark');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',2000)">Copy</button>
+        </div>
+
+        <div class="install-code" style="margin-top:10px;">
+          <span class="prompt">$</span>
           <span>go install github.com/louis-nwosu/Quark@latest</span>
           <button class="copy-btn" onclick="navigator.clipboard.writeText('go install github.com/louis-nwosu/Quark@latest');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',2000)">Copy</button>
         </div>
 
         <p style="margin-top:16px; font-size:12px; color:var(--text-muted);">
-          or download from <a href="https://github.com/louis-nwosu/Quark" target="_blank" style="color:var(--accent-text);text-decoration:none;">GitHub</a>
+          or download from <a href="https://github.com/louis-nwosu/Quark/releases" target="_blank" style="color:var(--accent-text);text-decoration:none;">GitHub Releases</a>
         </p>
       </div>
     </div>
