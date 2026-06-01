@@ -6,15 +6,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/macbookpro/quark/internal/llm"
-	"github.com/macbookpro/quark/internal/tools"
+	"github.com/louis-nwosu/Quark/internal/llm"
+	"github.com/louis-nwosu/Quark/internal/tools"
 )
 
 type EventType int
 
 const (
-	EventText  EventType = iota
+	EventText      EventType = iota
 	EventTextChunk
+	EventReasoning
 	EventToolStart
 	EventToolResult
 	EventToolError
@@ -48,6 +49,8 @@ type Agent struct {
 	tools            *tools.Registry
 	session          *Session
 	CompactThreshold int
+	ContextWindow    int
+	BudgetRatio      float64
 }
 
 func New(provider llm.Provider, reg *tools.Registry) *Agent {
@@ -71,9 +74,11 @@ Use bash to run tests, builds, and verify your changes.
 Be concise and precise in your responses.`
 
 	return &Agent{
-		provider: provider,
-		tools:    reg,
-		session:  NewSession(defaultSystem),
+		provider:      provider,
+		tools:         reg,
+		session:       NewSession(defaultSystem),
+		ContextWindow: 128000,
+		BudgetRatio:   0.8,
 	}
 }
 
@@ -102,11 +107,18 @@ func (a *Agent) Run(ctx context.Context, msg string, events chan<- Event) {
 	defer close(events)
 	defer a.session.Save()
 
-	threshold := a.CompactThreshold
-	if threshold <= 0 {
-		threshold = 100
+	budget := a.CompactThreshold
+	if budget <= 0 {
+		budget = int(float64(a.ContextWindow) * a.BudgetRatio)
 	}
-	a.session.Compact(threshold)
+
+	// Step 1: token-aware compaction (drop/degrade low-priority messages)
+	a.session.CompactWithBudget(budget)
+
+	// Step 2: LLM-based summarization if still over 70% of budget
+	if a.session.TotalTokens() > int(float64(budget)*0.7) {
+		a.summarizeOldTurns(ctx)
+	}
 
 	a.session.AddUserMessage(msg)
 
@@ -131,6 +143,8 @@ func (a *Agent) Run(ctx context.Context, msg string, events chan<- Event) {
 			case llm.StreamChunk:
 				textBuf.WriteString(se.Text)
 				events <- Event{Type: EventTextChunk, Text: se.Text}
+			case llm.StreamReasoning:
+				events <- Event{Type: EventReasoning, Text: se.Text}
 			case llm.StreamToolCall:
 				if toolCall == nil {
 					toolCall = se.ToolCall
@@ -204,6 +218,58 @@ func (a *Agent) Run(ctx context.Context, msg string, events chan<- Event) {
 	events <- Event{Type: EventError, Error: fmt.Errorf("exceeded maximum tool call rounds (25)")}
 }
 
+func (a *Agent) summarizeOldTurns(ctx context.Context) {
+	msgs, count := a.session.MessagesForSummary()
+	if count < 2 {
+		return
+	}
+
+	// Format the messages as a conversation text
+	var b strings.Builder
+	b.WriteString("Summarize this coding conversation segment. Include: decisions made, files modified, commands run, user preferences, and current state. Keep the summary concise.\n\n")
+	for _, m := range msgs {
+		switch m.Role {
+		case llm.RoleUser:
+			b.WriteString("User: ")
+			b.WriteString(m.Content)
+			b.WriteString("\n")
+		case llm.RoleAssistant:
+			if len(m.ToolCalls) > 0 {
+				for _, tc := range m.ToolCalls {
+					b.WriteString("Assistant (tool: ")
+					b.WriteString(tc.Function.Name)
+					b.WriteString("):\n")
+				}
+			} else if m.Content != "" {
+				b.WriteString("Assistant: ")
+				b.WriteString(m.Content)
+				b.WriteString("\n")
+			}
+		case llm.RoleTool:
+			content := m.Content
+			if len(content) > 200 {
+				content = content[:200] + "..."
+			}
+			b.WriteString("Tool result: ")
+			b.WriteString(content)
+			b.WriteString("\n")
+		}
+	}
+
+	summaryReq := &llm.ChatRequest{
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Content: b.String()},
+		},
+	}
+
+	resp, err := a.provider.Chat(ctx, summaryReq)
+	if err != nil || resp == nil || resp.Text == "" {
+		return
+	}
+
+	a.session.ReplaceWithSummary(resp.Text, count)
+}
+
 func summarizeToolResult(name string, r *tools.ToolResult) string {
 	if !r.Success {
 		return truncate(r.Data, 120)
@@ -246,4 +312,11 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

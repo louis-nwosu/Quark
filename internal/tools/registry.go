@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/macbookpro/quark/internal/llm"
+	"github.com/louis-nwosu/Quark/internal/llm"
 )
 
 type ToolResult struct {

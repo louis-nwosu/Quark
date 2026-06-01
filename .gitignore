@@ -17,6 +17,9 @@ session.json
 *.swp
 *.swo
 
+# GoReleaser
+dist/
+
 # Go
 *.test
 *.out

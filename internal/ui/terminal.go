@@ -5,13 +5,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/glamour"
-	"github.com/macbookpro/quark/internal/agent"
-	"github.com/macbookpro/quark/internal/config"
+	"github.com/louis-nwosu/Quark/internal/agent"
+	"github.com/louis-nwosu/Quark/internal/config"
+	"github.com/peterh/liner"
 	"golang.org/x/term"
 )
 
@@ -19,6 +21,8 @@ type Terminal struct {
 	renderer *glamour.TermRenderer
 	oldState *term.State
 	width    int
+	line     *liner.State
+	history  string
 }
 
 func NewTerminal() *Terminal {
@@ -35,12 +39,26 @@ func NewTerminal() *Terminal {
 		width = w - 2
 	}
 
-	t := &Terminal{renderer: renderer, width: width}
+	line := liner.NewLiner()
+	line.SetCtrlCAborts(true)
+
+	histFile := filepath.Join(os.TempDir(), "quark_history")
+	if f, err := os.Open(histFile); err == nil {
+		line.ReadHistory(f)
+		f.Close()
+	}
+
+	t := &Terminal{renderer: renderer, width: width, line: line, history: histFile}
 	t.enterRaw()
 	return t
 }
 
 func (t *Terminal) Close() {
+	if f, err := os.Create(t.history); err == nil {
+		t.line.WriteHistory(f)
+		f.Close()
+	}
+	t.line.Close()
 	t.exitRaw()
 }
 
@@ -123,64 +141,48 @@ func max(a, b int) int {
 	return b
 }
 
-// ── Stunning Welcome ─────────────────────────────────────────
+// ── Banner ─────────────────────────────────────────────────
 
-func (t *Terminal) ShowWelcome() {
+func (t *Terminal) ShowBanner() {
 	t.withCooked(func() {
-		// ┌─ top border ─────────────────────────────────┐
-		top := "  ┌" + strings.Repeat("─", t.width-4) + "┐"
-		fmt.Println()
-		fmt.Println(t.cyan(top))
-
-		// empty line inside box
-		empty := "  │" + strings.Repeat(" ", t.width-4) + "│"
-		fmt.Println(t.dim(empty))
-
-		// Quark logo with gradient
-		logo := "  │" + centerText("⚡  q u a r k", t.width-4) + "│"
-		fmt.Println(t.gradient(logo, 87, 45)) // bright cyan → blue
-
-		// tagline in dim
-		tagline := "  │" + centerText("lightweight terminal coding agent", t.width-4) + "│"
-		fmt.Println(t.dim(tagline))
-
-		// empty line
-		fmt.Println(t.dim(empty))
-
-		// bottom border
-		bottom := "  └" + strings.Repeat("─", t.width-4) + "┘"
-		fmt.Println(t.cyan(bottom))
-
-		// spacer
+		logo := `  ____  _    _         _____  _  __
+ / __ \| |  | |  /\   |  __ \| |/ /
+| |  | | |  | | /  \  | |__) | ' / 
+| |  | | |  | |/ /\ \ |  _  /|  <  
+| |__| | |__| / ____ \| | \ \| . \ 
+ \___\_\\____/_/    \_\_|  \_\_|\_\`
+		lines := strings.Split(logo, "\n")
+		for _, line := range lines {
+			fmt.Println(t.gradient(line, 87, 45))
+		}
+		tagline := "code or be coded"
+		fmt.Println("  " + t.color256(160, tagline))
 		fmt.Println()
 	})
 }
 
 // ── Free Model Notice ────────────────────────────────────────
 
-func (t *Terminal) ShowFreeModelNotice() {
+func (t *Terminal) ShowProviderStatus(cfg *config.Config) {
 	t.withCooked(func() {
-		// A colored info card
-		cardWidth := t.width - 6
-		pad := strings.Repeat(" ", 4)
-
-		fmt.Printf("  %s\n", t.color256(87, "┌"+strings.Repeat("─", cardWidth)+"┐"))
-
-		line := fmt.Sprintf("│%s%s  %s", pad, t.color256(220, "✦"), t.color256(87, "free tier active"))
-		line += strings.Repeat(" ", cardWidth+t.width-6-(visibleLen(stripANSI(line))+t.width-cardWidth-4-2))
-		// better to just build fixed-width
-		fmt.Printf("  │%s%s  %s%s│\n",
-			pad, t.color256(220, "✦"), t.color256(87, "free tier active"),
-			strings.Repeat(" ", cardWidth-len("free tier active")-4-2))
-		fmt.Printf("  │%s%s%s│\n",
-			pad, t.color256(245, "  openrouter/free · auto-routes"),
-			strings.Repeat(" ", cardWidth-len("  openrouter/free · auto-routes")-2))
-		fmt.Printf("  │%s%s%s│\n",
-			pad, t.color256(245, "  run /config to add your own API key"),
-			strings.Repeat(" ", cardWidth-len("  run /config to add your own API key")-2))
-
-		fmt.Printf("  %s\n", t.color256(87, "└"+strings.Repeat("─", cardWidth)+"┘"))
-		fmt.Println()
+		pc := cfg.Providers[cfg.DefaultProvider]
+		model := pc.Model
+		if model == "" {
+			model = cfg.DefaultProvider
+		}
+		sep := t.color256(240, strings.Repeat("─", t.width-6))
+		fmt.Printf("  %s\n", sep)
+		if cfg.HasUserAPIKey() {
+			fmt.Printf("  %s  %s\n",
+				t.color256(83, "●"),
+				t.bold(t.color256(250, model)))
+		} else {
+			fmt.Printf("  %s  %s  %s\n",
+				t.color256(220, "◌"),
+				t.bold(t.color256(250, model)),
+				t.color256(240, "run /config to set up"))
+		}
+		fmt.Printf("  %s\n\n", sep)
 	})
 }
 
@@ -336,24 +338,22 @@ func (t *Terminal) AskAPIKey() (provider, apiKey string) {
 // ── Prompt ───────────────────────────────────────────────────
 
 func (t *Terminal) Prompt() (string, error) {
-	t.exitRaw()
-	defer t.enterRaw()
-
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("\n\033[38;5;83muser\033[0m \033[1m❯\033[0m ")
-	line, err := reader.ReadString('\n')
+	line, err := t.line.Prompt("  ◆ ask ")
 	if err != nil {
+		if err == liner.ErrPromptAborted {
+			return "", nil
+		}
 		return "", err
 	}
+	t.line.AppendHistory(line)
 	return strings.TrimSpace(line), nil
 }
 
 // ── Stream Response ──────────────────────────────────────────
 
 func (t *Terminal) StreamResponse(ctx context.Context, ag *agent.Agent, msg string) {
-	// echo user message
 	t.withCooked(func() {
-		fmt.Printf("  %s\n", t.color256(83, "user"))
+		fmt.Printf("  %s  %s\n", t.color256(83, "◆"), t.bold(t.color256(250, "you")))
 		fmt.Printf("  %s\n\n", t.color256(250, msg))
 	})
 
@@ -362,6 +362,7 @@ func (t *Terminal) StreamResponse(ctx context.Context, ag *agent.Agent, msg stri
 	go ag.Run(ctx, msg, events)
 
 	var streamedHeader bool
+	var reasoning bool
 
 	for evt := range events {
 		if spinner != nil {
@@ -369,16 +370,36 @@ func (t *Terminal) StreamResponse(ctx context.Context, ag *agent.Agent, msg stri
 			spinner = nil
 		}
 
+		if reasoning && evt.Type != agent.EventReasoning {
+			reasoning = false
+			t.withCooked(func() {
+				fmt.Println()
+				fmt.Println()
+			})
+		}
+
 		switch evt.Type {
+		case agent.EventReasoning:
+			if !reasoning {
+				reasoning = true
+				t.withCooked(func() {
+					fmt.Printf("  %s\n", t.dim(strings.Repeat("─", t.width-6)))
+					fmt.Printf("  %s  %s\n", t.color256(208, "◌"), t.bold(t.color256(208, "reasoning")))
+				})
+			}
+			t.withCooked(func() {
+				text := strings.ReplaceAll(evt.Text, "\n", " ")
+				fmt.Print(t.color256(222, text))
+			})
+
 		case agent.EventTextChunk:
 			if !streamedHeader {
 				streamedHeader = true
 				t.withCooked(func() {
-					fmt.Printf("  %s\n", t.color256(240, strings.Repeat("┄", t.width-6)))
-					fmt.Printf("  %s\n", t.color256(83, "assistant"))
+					fmt.Printf("  %s\n", t.dim(strings.Repeat("─", t.width-6)))
+					fmt.Printf("  %s  %s\n", t.color256(83, "●"), t.bold(t.color256(83, "assistant")))
 				})
 			}
-			// print chunk directly — raw mode disabled at start of withCooked
 			t.withCooked(func() {
 				fmt.Print(evt.Text)
 			})
@@ -386,16 +407,15 @@ func (t *Terminal) StreamResponse(ctx context.Context, ag *agent.Agent, msg stri
 		case agent.EventText:
 			if !streamedHeader {
 				t.withCooked(func() {
-					fmt.Printf("  %s\n", t.color256(240, strings.Repeat("┄", t.width-6)))
+					fmt.Printf("  %s\n", t.dim(strings.Repeat("─", t.width-6)))
+					fmt.Printf("  %s  %s\n", t.color256(83, "●"), t.bold(t.color256(83, "assistant")))
 				})
 				t.printAssistantMessage(evt.Text)
 			} else {
-				// final newline after streaming text
 				t.withCooked(func() {
 					fmt.Println()
 					fmt.Println()
 				})
-				// re-render with glamour
 				t.printAssistantMessage(evt.Text)
 			}
 
@@ -474,9 +494,6 @@ func (t *Terminal) runSpinner(s *Spinner, text string) {
 // ── Output renderers ─────────────────────────────────────────
 
 func (t *Terminal) printAssistantMessage(msg string) {
-	t.withCooked(func() {
-		fmt.Printf("  %s\n", t.color256(83, "assistant"))
-	})
 	t.renderMarkdown(msg)
 }
 
@@ -484,6 +501,10 @@ func (t *Terminal) printToolStart(tool *agent.ToolEvent) {
 	t.withCooked(func() {
 		primary := t.primaryArg(tool)
 		if primary != "" {
+			maxLen := t.width/2 - 10
+			if len(primary) > maxLen {
+				primary = primary[:maxLen] + "…"
+			}
 			primary = " " + t.color256(245, primary)
 		}
 		line := fmt.Sprintf("  %s %s%s",
@@ -515,7 +536,15 @@ func (t *Terminal) printToolError(r *agent.ToolResultEvent) {
 
 func (t *Terminal) printError(err error) {
 	t.withCooked(func() {
-		fmt.Printf("\n  %s %s %v\n", t.red("✗"), t.bold("error"), err)
+		msg := err.Error()
+		if strings.Contains(msg, "401") || strings.Contains(msg, "Authentication") || strings.Contains(msg, "auth") {
+			fmt.Printf("\n  %s %s  %s\n",
+				t.red("✗"),
+				t.bold("not configured"),
+				t.color256(245, "run /config to set up an API key"))
+		} else {
+			fmt.Printf("\n  %s %s %v\n", t.red("✗"), t.bold("error"), err)
+		}
 	})
 }
 
@@ -579,15 +608,6 @@ func (t *Terminal) cyan(s string) string {
 
 func (t *Terminal) bold(s string) string {
 	return fmt.Sprintf("\033[1m%s\033[0m", s)
-}
-
-func centerText(s string, width int) string {
-	n := len([]rune(stripANSI(s)))
-	if n >= width {
-		return " " + s + " "
-	}
-	pad := (width - n) / 2
-	return strings.Repeat(" ", pad) + s + strings.Repeat(" ", width-n-pad)
 }
 
 func stripANSI(s string) string {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/macbookpro/quark/internal/config"
+	"github.com/louis-nwosu/Quark/internal/config"
 )
 
 type Role string
@@ -61,7 +61,8 @@ type Usage struct {
 type StreamEventType int
 
 const (
-	StreamChunk  StreamEventType = iota
+	StreamChunk     StreamEventType = iota
+	StreamReasoning
 	StreamToolCall
 	StreamDone
 	StreamError
@@ -84,7 +85,7 @@ func NewProvider(cfg *config.Config) (Provider, error) {
 	if !ok {
 		return nil, &ErrNoProvider{Name: cfg.DefaultProvider}
 	}
-	if pc.APIKey == "" {
+	if pc.APIKey == "" && cfg.DefaultProvider != "openrouter" {
 		return nil, &ErrNoAPIKey{Provider: cfg.DefaultProvider}
 	}
 

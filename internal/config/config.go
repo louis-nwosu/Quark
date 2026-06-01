@@ -13,9 +13,11 @@ const (
 )
 
 type ProviderConfig struct {
-	APIKey  string `json:"api_key"`
-	Model   string `json:"model"`
-	BaseURL string `json:"base_url,omitempty"`
+	APIKey         string `json:"api_key"`
+	Model          string `json:"model"`
+	BaseURL        string `json:"base_url,omitempty"`
+	ContextWindow  int    `json:"context_window,omitempty"`
+	SummarizeModel string `json:"summarize_model,omitempty"`
 }
 
 type Config struct {
@@ -30,16 +32,19 @@ func Default() *Config {
 	return &Config{
 		Providers: map[string]ProviderConfig{
 			"openrouter": {
-				Model:   OpenRouterFreeModel,
-				BaseURL: "https://openrouter.ai/api/v1",
+				Model:         OpenRouterFreeModel,
+				BaseURL:       "https://openrouter.ai/api/v1",
+				ContextWindow: 128000,
 			},
 			"openai": {
-				Model:   "gpt-4o",
-				BaseURL: "https://api.openai.com/v1",
+				Model:         "gpt-4o",
+				BaseURL:       "https://api.openai.com/v1",
+				ContextWindow: 128000,
 			},
 			"anthropic": {
-				Model:   "claude-sonnet-4-20250514",
-				BaseURL: "https://api.anthropic.com",
+				Model:         "claude-sonnet-4-20250514",
+				BaseURL:       "https://api.anthropic.com",
+				ContextWindow: 200000,
 			},
 		},
 		DefaultProvider:  "openrouter",
@@ -75,6 +80,15 @@ func Load() (*Config, error) {
 }
 
 func (c *Config) Save() error {
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	// If .quark.json exists in the current directory, save there
+	// (it takes priority on load, so the saved data must go there to persist)
+	if _, err := os.Stat(".quark.json"); err == nil {
+		return os.WriteFile(".quark.json", data, 0600)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("home dir: %w", err)
@@ -84,10 +98,6 @@ func (c *Config) Save() error {
 		return fmt.Errorf("mkdir: %w", err)
 	}
 	path := filepath.Join(dir, "quark.json")
-	data, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write: %w", err)
 	}
@@ -118,6 +128,13 @@ func (c *Config) ProviderNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func (c *Config) ContextWindow() int {
+	if pc, ok := c.Providers[c.DefaultProvider]; ok && pc.ContextWindow > 0 {
+		return pc.ContextWindow
+	}
+	return 128000
 }
 
 func (c *Config) ProviderStatus(name string) string {

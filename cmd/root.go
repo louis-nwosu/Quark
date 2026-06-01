@@ -8,11 +8,11 @@ import (
 	"os/signal"
 	"strings"
 
-	"github.com/macbookpro/quark/internal/agent"
-	"github.com/macbookpro/quark/internal/config"
-	"github.com/macbookpro/quark/internal/llm"
-	"github.com/macbookpro/quark/internal/tools"
-	"github.com/macbookpro/quark/internal/ui"
+	"github.com/louis-nwosu/Quark/internal/agent"
+	"github.com/louis-nwosu/Quark/internal/config"
+	"github.com/louis-nwosu/Quark/internal/llm"
+	"github.com/louis-nwosu/Quark/internal/tools"
+	"github.com/louis-nwosu/Quark/internal/ui"
 )
 
 func Execute() {
@@ -29,8 +29,6 @@ func Execute() {
 	tui := ui.NewTerminal()
 	defer tui.Close()
 
-	tui.ShowWelcome()
-
 	cfg, err := config.Load()
 	if err != nil {
 		tui.Printf("config error: %v\n", err)
@@ -46,10 +44,6 @@ func Execute() {
 		}
 	}
 
-	if cfg.IsUsingFreeModel() {
-		tui.ShowFreeModelNotice()
-	}
-
 	args := flag.Args()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -59,7 +53,7 @@ func Execute() {
 		if provider == nil {
 			return
 		}
-		ag := newAgent(provider)
+		ag := newAgent(provider, cfg)
 		tui.StreamResponse(ctx, ag, args[0])
 		return
 	}
@@ -77,11 +71,14 @@ func interactive(ctx context.Context, tui *ui.Terminal, cfg *config.Config, init
 	if provider == nil {
 		return
 	}
-	ag := newAgent(provider)
+	ag := newAgent(provider, cfg)
+
+	tui.ShowBanner()
 
 	if ag.HasSession() {
-		tui.Printf("  \033[38;5;87m↻ resumed\033[0m  \033[38;5;245m%d messages in history\033[0m\n", ag.MessageCount())
+		tui.Printf("  \033[38;5;87m↻\033[0m  \033[38;5;245mresumed — %d messages\033[0m\n", ag.MessageCount())
 	}
+	tui.ShowProviderStatus(cfg)
 
 	if initial != "" {
 		tui.StreamResponse(ctx, ag, initial)
@@ -105,8 +102,9 @@ func interactive(ctx context.Context, tui *ui.Terminal, cfg *config.Config, init
 				tui.ShowConfigUI(cfg)
 				provider = newProvider(tui, cfg)
 				if provider != nil {
-					ag = newAgent(provider)
+					ag = newAgent(provider, cfg)
 				}
+				tui.ShowProviderStatus(cfg)
 			case "/exit", "/quit":
 				tui.Printf("  goodbye\n")
 				return
@@ -148,9 +146,13 @@ func newProvider(tui *ui.Terminal, cfg *config.Config) llm.Provider {
 	return provider
 }
 
-func newAgent(provider llm.Provider) *agent.Agent {
+func newAgent(provider llm.Provider, cfg *config.Config) *agent.Agent {
 	reg := tools.NewRegistry()
 	ag := agent.New(provider, reg)
+	ag.ContextWindow = cfg.ContextWindow()
+	if cfg.CompactThreshold > 0 {
+		ag.CompactThreshold = cfg.CompactThreshold
+	}
 	ag.LoadSession()
 	return ag
 }

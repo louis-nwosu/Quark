@@ -82,6 +82,7 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req *ChatRequest) (<
 
 		var toolID, toolName string
 		var toolArgs strings.Builder
+		var thinkingText strings.Builder
 
 		dec := NewSSEDecoder(resp.Body)
 		for {
@@ -99,18 +100,25 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req *ChatRequest) (<
 				var cbs struct {
 					Index int `json:"index"`
 					ContentBlock struct {
-						Type string `json:"type"`
-						Text string `json:"text"`
-						ID   string `json:"id"`
-						Name string `json:"name"`
+						Type     string `json:"type"`
+						Text     string `json:"text"`
+						Thinking string `json:"thinking"`
+						ID       string `json:"id"`
+						Name     string `json:"name"`
 					} `json:"content_block"`
 				}
 				json.Unmarshal(data, &cbs)
-				if cbs.ContentBlock.Type == "text" {
+				switch cbs.ContentBlock.Type {
+				case "text":
 					if cbs.ContentBlock.Text != "" {
 						ch <- StreamEvent{Type: StreamChunk, Text: cbs.ContentBlock.Text}
 					}
-				} else if cbs.ContentBlock.Type == "tool_use" {
+				case "thinking":
+					thinkingText.Reset()
+					if cbs.ContentBlock.Thinking != "" {
+						ch <- StreamEvent{Type: StreamReasoning, Text: cbs.ContentBlock.Thinking}
+					}
+				case "tool_use":
 					toolID = cbs.ContentBlock.ID
 					toolName = cbs.ContentBlock.Name
 					toolArgs.Reset()
@@ -122,13 +130,25 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req *ChatRequest) (<
 					Delta struct {
 						Type        string `json:"type"`
 						Text        string `json:"text"`
+						Thinking    string `json:"thinking"`
 						PartialJSON string `json:"partial_json"`
 					} `json:"delta"`
 				}
 				json.Unmarshal(data, &cbd)
-				if cbd.Delta.Type == "text_delta" {
-					ch <- StreamEvent{Type: StreamChunk, Text: cbd.Delta.Text}
-				} else if cbd.Delta.Type == "input_json_delta" {
+				switch cbd.Delta.Type {
+				case "text_delta":
+					if thinkingText.Len() > 0 {
+						ch <- StreamEvent{Type: StreamReasoning, Text: thinkingText.String()}
+						thinkingText.Reset()
+					}
+					if cbd.Delta.Text != "" {
+						ch <- StreamEvent{Type: StreamChunk, Text: cbd.Delta.Text}
+					}
+				case "thinking_delta":
+					if cbd.Delta.Thinking != "" {
+						ch <- StreamEvent{Type: StreamReasoning, Text: cbd.Delta.Thinking}
+					}
+				case "input_json_delta":
 					toolArgs.WriteString(cbd.Delta.PartialJSON)
 				}
 

@@ -85,7 +85,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req *ChatRequest) (*ChatRespo
 	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
 	if strings.Contains(p.baseURL, "openrouter") {
 		httpReq.Header.Set("X-Title", "Quark")
-		httpReq.Header.Set("HTTP-Referer", "https://github.com/macbookpro/quark")
+		httpReq.Header.Set("HTTP-Referer", "https://github.com/louis-nwosu/Quark")
 	}
 
 	resp, err := http.DefaultClient.Do(httpReq)
@@ -169,7 +169,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req *ChatRequest) (<-ch
 	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
 	if strings.Contains(p.baseURL, "openrouter") {
 		httpReq.Header.Set("X-Title", "Quark")
-		httpReq.Header.Set("HTTP-Referer", "https://github.com/macbookpro/quark")
+		httpReq.Header.Set("HTTP-Referer", "https://github.com/louis-nwosu/Quark")
 	}
 
 	go func() {
@@ -219,8 +219,10 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req *ChatRequest) (<-ch
 			var delta struct {
 				Choices []struct {
 					Delta struct {
-						Content   *string            `json:"content"`
-						ToolCalls []struct {
+						Content          *string            `json:"content"`
+						Reasoning        *string            `json:"reasoning"`
+						ReasoningContent *string            `json:"reasoning_content"`
+						ToolCalls        []struct {
 							Index    int     `json:"index"`
 							ID       *string `json:"id"`
 							Type     *string `json:"type"`
@@ -247,8 +249,16 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req *ChatRequest) (<-ch
 				finishReason = *choice.FinishReason
 			}
 
-			// text chunk
-			if choice.Delta.Content != nil {
+			// reasoning chunk (skip empty)
+			if choice.Delta.Reasoning != nil && *choice.Delta.Reasoning != "" {
+				ch <- StreamEvent{Type: StreamReasoning, Text: *choice.Delta.Reasoning}
+			}
+			if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
+				ch <- StreamEvent{Type: StreamReasoning, Text: *choice.Delta.ReasoningContent}
+			}
+
+			// text chunk (skip empty)
+			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 				ch <- StreamEvent{Type: StreamChunk, Text: *choice.Delta.Content}
 			}
 
