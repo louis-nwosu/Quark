@@ -1,12 +1,9 @@
 package cmd
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
-	"os/signal"
-	"strings"
 
 	"github.com/louis-nwosu/Quark/internal/agent"
 	"github.com/louis-nwosu/Quark/internal/config"
@@ -26,12 +23,9 @@ func Execute() {
 		return
 	}
 
-	tui := ui.NewTerminal()
-	defer tui.Close()
-
 	cfg, err := config.Load()
 	if err != nil {
-		tui.Printf("config error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -45,102 +39,37 @@ func Execute() {
 	}
 
 	args := flag.Args()
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
 
-	if len(args) > 0 {
-		provider := newProvider(tui, cfg)
-		if provider == nil {
-			return
-		}
-		ag := newAgent(provider, cfg)
-		tui.StreamResponse(ctx, ag, args[0])
-		return
-	}
-
-	if *prompt != "" {
-		interactive(ctx, tui, cfg, *prompt)
-		return
-	}
-
-	interactive(ctx, tui, cfg, "")
-}
-
-func interactive(ctx context.Context, tui *ui.Terminal, cfg *config.Config, initial string) {
-	provider := newProvider(tui, cfg)
+	provider := newProvider(cfg)
 	if provider == nil {
 		return
 	}
 	ag := newAgent(provider, cfg)
 
-	tui.ShowBanner()
+	tui := ui.NewTerminal(ag, cfg)
 
-	if ag.HasSession() {
-		tui.Printf("  \033[38;5;87m↻\033[0m  \033[38;5;245mresumed — %d messages\033[0m\n", ag.MessageCount())
-	}
-	tui.ShowProviderStatus(cfg)
-
-	if initial != "" {
-		tui.StreamResponse(ctx, ag, initial)
+	if len(args) > 0 {
+		tui.SendMessage(args[0])
 	}
 
-	for {
-		msg, err := tui.Prompt()
-		if err != nil {
-			break
-		}
-		if msg == "" {
-			continue
-		}
+	if *prompt != "" {
+		tui.SendMessage(*prompt)
+	}
 
-		if strings.HasPrefix(msg, "/") {
-			switch msg {
-			case "/clear":
-				ag.Clear()
-				tui.Printf("  conversation cleared\n")
-			case "/config":
-				tui.ShowConfigUI(cfg)
-				provider = newProvider(tui, cfg)
-				if provider != nil {
-					ag = newAgent(provider, cfg)
-				}
-				tui.ShowProviderStatus(cfg)
-			case "/exit", "/quit":
-				tui.Printf("  goodbye\n")
-				return
-			case "/help", "/?":
-				showSlashHelp(tui)
-			default:
-				tui.Printf("unknown command: %s\n", msg)
-			}
-			continue
-		}
-
-		tui.StreamResponse(ctx, ag, msg)
+	if err := tui.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "ui error: %v\n", err)
+		os.Exit(1)
 	}
 }
 
-func newProvider(tui *ui.Terminal, cfg *config.Config) llm.Provider {
+func newProvider(cfg *config.Config) llm.Provider {
 	provider, err := llm.NewProvider(cfg)
 	if err != nil {
 		if _, ok := err.(*llm.ErrNoAPIKey); ok {
-			name, key := tui.AskAPIKey()
-			if key == "" {
-				return nil
-			}
-			pc := cfg.Providers[name]
-			pc.APIKey = key
-			cfg.Providers[name] = pc
-			cfg.DefaultProvider = name
-			cfg.Save()
-			provider, err = llm.NewProvider(cfg)
-			if err != nil {
-				tui.Printf("provider error: %v\n", err)
-				return nil
-			}
-			return provider
+			fmt.Fprintf(os.Stderr, "no API key configured — run /config inside quark\n")
+			return nil
 		}
-		tui.Printf("provider error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "provider error: %v\n", err)
 		return nil
 	}
 	return provider
@@ -155,17 +84,6 @@ func newAgent(provider llm.Provider, cfg *config.Config) *agent.Agent {
 	}
 	ag.LoadSession()
 	return ag
-}
-
-func showSlashHelp(tui *ui.Terminal) {
-	b := "\033[1m"
-	d := "\033[0m"
-	tui.Printf("\n %sSlash Commands%s\n\n", b, d)
-	tui.Printf("   %s/clear%s   Clear conversation history\n", b, d)
-	tui.Printf("   %s/config%s   Open interactive config UI (add API keys, change provider)\n", b, d)
-	tui.Printf("   %s/exit%s    Exit quark\n", b, d)
-	tui.Printf("   %s/help%s    Show this message\n", b, d)
-	tui.Printf("\n")
 }
 
 func printHelp() {
@@ -185,8 +103,8 @@ Config: ~/.config/quark/quark.json or ./.quark.json
 
 Slash commands:
   /clear  Clear conversation history
-  /config  Open config UI
-  /exit    Exit quark
-  /help    Show slash commands
+  /config Open config UI
+  /exit   Exit quark
+  /help   Show slash commands
 `)
 }

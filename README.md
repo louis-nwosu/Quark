@@ -1,6 +1,6 @@
 # Quark
 
-**quark** is a lightweight terminal coding agent — think Claude Code or Cline, but as a single Go binary with zero runtime dependencies. It pairs an LLM (OpenAI, Anthropic, or OpenRouter) with file-system tools to autonomously read, write, edit, search, and execute code on your behalf.
+**quark** is a lightweight terminal coding agent — think Claude Code or opencode, but with a focus on simplicity and a polished [tview](https://github.com/rivo/tview)-based TUI. It pairs an LLM (OpenAI, Anthropic, or OpenRouter) with file-system tools to autonomously read, write, edit, search, and execute code on your behalf.
 
 ## Quick Start
 
@@ -45,7 +45,7 @@ quark -m "refactor the auth module"     # Interactive with initial prompt
 ## Features
 
 - **Multi-provider LLM support** — OpenAI, Anthropic Claude, and OpenRouter (with free tier)
-- **Streaming responses** — token-by-token text rendering with a colorful spinner
+- **Streaming responses** — token-by-token text rendering with real-time display
 - **Tool-use agent loop** — think-act-observe cycle up to 25 rounds
 - **File operations** — read, write, edit with string replacement
 - **Code search** — regex (`grep`) and glob pattern matching
@@ -53,7 +53,7 @@ quark -m "refactor the auth module"     # Interactive with initial prompt
 - **Git integration** — status, diff, and commit tools
 - **Session persistence** — conversations survive restarts, auto-resume with history notice
 - **Context window compaction** — drops old conversational turns when the history grows too long
-- **Polished TUI** — box-drawn cards, gradient text, colored labels, and animated spinner
+- **Polished tview-based TUI** — inspired by opencode's dark theme, with left-border accent messages, metadata bar, and footer status
 - **Config discovery** — `.quark.json` in current dir, `~/.config/quark/quark.json`, env var overrides
 
 ## Configuration
@@ -111,7 +111,7 @@ main.go → cmd/root.go
               │   ├── bash.go, grep.go, glob.go
               │   └── git.go
               └── internal/ui/         Terminal UI
-                  └── terminal.go      Prompt, spinner, markdown rendering
+                  └── terminal.go      tview-based TUI, event handling, config UI
 ```
 
 ### Agent Loop
@@ -122,7 +122,7 @@ User message
 LLM responds (streaming text or tool call)
     ↓
 If tool call → execute tool → add result to session → loop
-If text     → render with glamour → done
+If text     → render response → done
 ```
 
 ### Tool System
@@ -144,13 +144,64 @@ go build -o quark . && go vet ./...   # Build + lint
 ./quark                      # Run
 ```
 
+## Progress & Current Limitations
+
+### What's implemented
+
+- **tview-based TUI** replacing the old glamour/liner stack — full terminal event loop, dynamic colors, scrollable chat
+- **Input area** with left-border accent, placeholder, and metadata bar showing model/provider
+- **Footer bar** with working directory and status indicators (LSP, MCP placeholders)
+- **Config UI** overlay — provider list, form-based editing of API keys and models
+- **Streaming response display** — tool calls, results, reasoning, errors rendered with opencode-inspired styling
+- **Slash commands** — `/clear`, `/config`, `/exit`, `/help`
+- **Session persistence** — conversation history across restarts
+- **Context compaction** — token-aware eviction and LLM-based summarization
+- **Multi-provider** — OpenAI, Anthropic, OpenRouter with streaming SSE
+
+### Known limitations
+
+- **Markdown rendering** — assistant responses are displayed as plain text (no markdown formatting yet)
+- **Multi-line input** — single-line InputField only; no multi-line text area or external editor integration
+- **No markdown rendering** — code blocks, lists, and headings appear as raw markdown syntax
+- **No agent coloring** — currently uses a single agent accent color; per-agent color assignment not implemented
+- **File references** — no `@` file autocomplete or file attachment badges
+- **No LSP integration** — LSP status indicator is a placeholder in the footer
+- **No MCP support** — MCP status indicator is a placeholder in the footer
+- **No undo/redo** — no `/undo` or `/redo` commands for reverting changes
+- **No session switching** — single session; no multi-session management
+- **No model switching** — no model picker dialog or runtime model switching
+- **Compact/summarize** — `/compact` slash command not exposed; compaction is auto-only
+- **No share links** — no `/share` or `/export` commands
+- **Config UI** — basic form-based editing; no fancy provider picker with model selection
+
+## Contributing
+
+Contributions are welcome! Here's how you can help:
+
+- **Pick a limitation above** and submit a PR to fix it
+- **Improve the TUI** — better markdown rendering, multi-line input, agent colors
+- **Add provider integrations** — Google Gemini, Groq, Azure OpenAI, AWS Bedrock, local models
+- **Add LSP integration** — wire up language servers for code intelligence
+- **Add MCP support** — implement the Model Context Protocol for extensible tooling
+- **Improve session management** — multiple sessions, session switching, undo/redo
+- **Write tests** — the codebase needs test coverage across all packages
+- **Documentation** — improve the README, add examples, write contributor guides
+
+To contribute:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
 ## Why Quark?
 
 - **Single binary** — no Python runtime, no npm install, no Docker
 - **Zero config startup** — works immediately with OpenRouter free tier
 - **Blazing fast** — Go concurrency, streaming SSE, minimal overhead
 - **Privacy-first** — your API keys stay in local config files
-- **Simple codebase** — ~2k lines of Go, easy to hack on
+- **Simple codebase** — easy to hack on and extend
 
 ## License
 
